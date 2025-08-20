@@ -1,0 +1,15 @@
+[package]
+name = "database"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+regex = "1.11.1"
+sqlx = { version = "0.8.6", features = [
+    "runtime-tokio-native-tls",
+    "all-databases",
+] }
+thiserror = "2.0.16"
