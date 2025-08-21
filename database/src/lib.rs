@@ -6,7 +6,7 @@ use error::Result;
 use serde::{Deserialize, Serialize};
 use sqlx::AnyPool;
 
-mod error;
+pub mod error;
 mod mysql;
 mod postgres;
 mod sqlite;
