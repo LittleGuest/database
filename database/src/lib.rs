@@ -1,10 +1,10 @@
-#![allow(unused)]
+// #![allow(unused)]
 
 use std::{fmt::Display, pin::Pin};
 
-use error::Result;
+use error::{Error, Result};
 use serde::{Deserialize, Serialize};
-use sqlx::AnyPool;
+use sqlx::{AnyPool, MySqlPool, PgPool, SqlitePool};
 
 pub mod error;
 mod mysql;
@@ -43,14 +43,21 @@ impl Display for Driver {
     }
 }
 
-impl From<&str> for Driver {
-    fn from(value: &str) -> Self {
-        match value.trim().to_lowercase().as_str() {
-            "mysql" => Self::Mysql,
-            "postgres" => Self::Postgres,
-            "sqlite" => Self::Sqlite,
-            _ => unimplemented!(),
+impl TryFrom<&str> for Driver {
+    type Error = Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let driver = value.trim().to_lowercase();
+        if driver.starts_with("mysql") {
+            return Ok(Self::Mysql);
         }
+        if driver.starts_with("postgres") {
+            return Ok(Self::Postgres);
+        }
+        if driver.starts_with("sqlite") {
+            return Ok(Self::Sqlite);
+        }
+        Err(Error::E("driver not support"))
     }
 }
 
@@ -59,40 +66,57 @@ type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 /// 数据库元数据
 pub trait DatabaseMetadata: Send + Sync {
     /// 获取所有的库
+    fn databases(&self) -> BoxFuture<'_, Result<Vec<Database>>>;
+    /// 获取所有的模式
     fn schemas(&self) -> BoxFuture<'_, Result<Vec<Schema>>>;
     /// 获取所有的表
-    fn tables<'a>(&'a self, schema: &'a str) -> BoxFuture<'a, Result<Vec<Table>>>;
+    fn tables<'a>(
+        &'a self,
+        database: &'a str,
+        schema: &'a str,
+    ) -> BoxFuture<'a, Result<Vec<Table>>>;
     /// 获取表的字段
     fn columns<'a>(
         &'a self,
+        database: &'a str,
         schema: &'a str,
         table_name: &'a str,
     ) -> BoxFuture<'a, Result<Vec<Column>>>;
     /// 获取表索引
     fn indexs<'a>(
         &'a self,
+        database: &'a str,
         schema: &'a str,
         table_name: &'a str,
     ) -> BoxFuture<'a, Result<Vec<Index>>>;
     /// 创建表SQL
     fn create_table_sql<'a>(
         &'a self,
+        database: &'a str,
         schema: &'a str,
         table_name: &'a str,
     ) -> BoxFuture<'a, Result<String>>;
 }
 
 pub async fn database_metadata(url: &str) -> Box<dyn DatabaseMetadata> {
-    let pool = AnyPool::connect(url).await.unwrap();
-    let driver = Driver::from(url);
+    let driver = Driver::try_from(url).unwrap_or_else(|e| {
+        eprintln!("database metadata error: {:?}", e);
+        std::process::exit(1);
+    });
     match driver {
-        Driver::Mysql => Box::new(MysqlMetadata::new(pool)),
-        Driver::Postgres => Box::new(PostgresMetadata::new(pool)),
-        Driver::Sqlite => Box::new(SqliteMetadata::new(pool)),
+        Driver::Mysql => Box::new(MysqlMetadata::new(MySqlPool::connect(url).await.unwrap())),
+        Driver::Postgres => Box::new(PostgresMetadata::new(PgPool::connect(url).await.unwrap())),
+        Driver::Sqlite => Box::new(SqliteMetadata::new(SqlitePool::connect(url).await.unwrap())),
     }
 }
 
-/// 库
+/// 数据库
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Database {
+    pub name: String,
+}
+
+/// 模式
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Schema {
     pub name: String,
@@ -303,16 +327,28 @@ impl From<String> for ColumnType {
     }
 }
 
+/// 初始化数据库驱动
+pub fn init() {
+    sqlx::any::install_default_drivers();
+}
+
 /// 获取指定数据库表和列信息
 pub async fn fetch_table_column(
     url: &str,
+    schema: &str,
     table_names: &[&str],
-) -> anyhow::Result<(Vec<Table>, Vec<Column>)> {
+) -> Result<(Vec<Table>, Vec<Column>)> {
     let metadata = database_metadata(url).await;
-    let tables = metadata.tables("").await?;
+    let tables = metadata.tables("", schema).await?;
     let mut columns = Vec::new();
-    for table_name in table_names {
-        columns.push(metadata.columns("", table_name).await?);
+    if table_names.is_empty() {
+        for table in tables.iter() {
+            columns.push(metadata.columns("", schema, &table.name).await?);
+        }
+    } else {
+        for table_name in table_names {
+            columns.push(metadata.columns("", schema, table_name).await?);
+        }
     }
     Ok((tables, columns.into_iter().flatten().collect::<Vec<_>>()))
 }

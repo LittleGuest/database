@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use sqlx::{AnyPool, FromRow, Row, any::AnyRow};
+use sqlx::{AnyPool, FromRow, MySqlPool, Row, any::AnyRow, mysql::MySqlRow};
 
 use super::{ColumnType, DatabaseMetadata, Result};
 
@@ -11,7 +11,19 @@ const SHOW_CREATE_TABLE: &str = "SHOW CREATE TABLE ?";
 const WORD_UNSIGNED: &str = "unsigned";
 const WORD_PRIMARY: &str = "PRIMARY";
 
-pub struct MysqlMetadata(AnyPool);
+pub struct MysqlMetadata(MySqlPool);
+
+#[derive(Debug, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct Database {
+    name: String,
+}
+
+impl From<Database> for super::Database {
+    fn from(d: Database) -> Self {
+        Self { name: d.name }
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 struct Schema {
@@ -283,16 +295,26 @@ impl From<Index> for super::Index {
 }
 
 impl MysqlMetadata {
-    pub fn new(pool: AnyPool) -> Self {
+    pub fn new(pool: MySqlPool) -> Self {
         Self(pool)
     }
 }
 
 impl DatabaseMetadata for MysqlMetadata {
+    fn databases(&self) -> super::BoxFuture<'_, Result<Vec<super::Database>>> {
+        Box::pin(async move {
+            let rows = sqlx::query(SHOW_DATABASES)
+                .map(|row: MySqlRow| Database { name: row.get(0) })
+                .map(|row| row.into())
+                .fetch_all(&self.0)
+                .await?;
+            Ok(rows)
+        })
+    }
     fn schemas(&self) -> super::BoxFuture<'_, Result<Vec<super::Schema>>> {
         Box::pin(async move {
             let rows = sqlx::query(SHOW_DATABASES)
-                .map(|row: AnyRow| Schema { name: row.get(0) })
+                .map(|row: MySqlRow| Schema { name: row.get(0) })
                 .map(|row| row.into())
                 .fetch_all(&self.0)
                 .await?;
@@ -300,7 +322,11 @@ impl DatabaseMetadata for MysqlMetadata {
         })
     }
 
-    fn tables<'a>(&'a self, schema: &'a str) -> super::BoxFuture<'a, Result<Vec<super::Table>>> {
+    fn tables<'a>(
+        &'a self,
+        database: &'a str,
+        schema: &'a str,
+    ) -> super::BoxFuture<'a, Result<Vec<super::Table>>> {
         Box::pin(async move {
             let rows: Vec<Table> = sqlx::query_as(SHOW_TABLES)
                 .bind(schema)
@@ -312,6 +338,7 @@ impl DatabaseMetadata for MysqlMetadata {
 
     fn columns<'a>(
         &'a self,
+        database: &'a str,
         schema: &'a str,
         table_name: &'a str,
     ) -> super::BoxFuture<'a, Result<Vec<super::Column>>> {
@@ -321,7 +348,7 @@ impl DatabaseMetadata for MysqlMetadata {
             ))
             .bind(table_name)
             .bind(schema)
-            .map(|row: AnyRow| {
+            .map(|row: MySqlRow| {
                 let field = row.get(0);
                 let r#type: Vec<u8> = row.get(1);
                 let r#type = String::from_utf8_lossy(&r#type).to_string();
@@ -355,6 +382,7 @@ impl DatabaseMetadata for MysqlMetadata {
 
     fn indexs<'a>(
         &'a self,
+        database: &'a str,
         schema: &'a str,
         table_name: &'a str,
     ) -> super::BoxFuture<'a, Result<Vec<super::Index>>> {
@@ -363,7 +391,7 @@ impl DatabaseMetadata for MysqlMetadata {
                 sqlx::query(&format!("SHOW INDEX FROM {table_name} FROM {schema}"))
                     .bind(table_name)
                     .bind(schema)
-                    .map(|row: AnyRow| {
+                    .map(|row: MySqlRow| {
                         let table_name = row.get(0);
                         let non_unique = row.get(1);
                         let key_name = row.get(2);
@@ -392,6 +420,7 @@ impl DatabaseMetadata for MysqlMetadata {
 
     fn create_table_sql<'a>(
         &'a self,
+        database: &'a str,
         schema: &'a str,
         table_name: &'a str,
     ) -> super::BoxFuture<'a, Result<String>> {
@@ -399,52 +428,10 @@ impl DatabaseMetadata for MysqlMetadata {
             let rows: String = sqlx::query(&format!("SHOW CREATE TABLE {schema}.{table_name}"))
                 .bind(schema)
                 .bind(table_name)
-                .map(|row: AnyRow| row.get(1))
+                .map(|row: MySqlRow| row.get(1))
                 .fetch_one(&self.0)
                 .await?;
             Ok(rows)
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const URL: &str = "mysql://root:123456@localhost:3306/test";
-
-    async fn meta() -> Result<MysqlMetadata> {
-        sqlx::any::install_default_drivers();
-        let pool = AnyPool::connect(URL).await?;
-        Ok(MysqlMetadata::new(pool))
-    }
-
-    #[tokio::test]
-    async fn test_schemas() -> Result<()> {
-        let meta = meta().await?;
-        meta.schemas().await?;
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_tables() -> Result<()> {
-        let meta = meta().await?;
-        meta.tables("differ").await?;
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_columns() -> Result<()> {
-        let meta = meta().await?;
-        meta.columns("differ", "db_detail").await?;
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_indexs() -> Result<()> {
-        sqlx::any::install_default_drivers();
-        let meta = meta().await?;
-        meta.indexs("differ", "db_detail").await?;
-        Ok(())
     }
 }

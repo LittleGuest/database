@@ -1,0 +1,51 @@
+# 数据库连接配置
+# 支持的格式：
+# - MySQL: mysql://root:root@localhost:3306/test
+# - PostgreSQL: postgres://postgres:postgres@localhost:5432/test
+# - SQLite: sqlite://test.sqlite
+database_url = "postgres://postgres:postgres@localhost:5432/peanut"
+# 数据库模式（对于MySQL通常为database名，PostgreSQL为schema名）
+schema = "public"
+# 生成代码的编程语言 (rust 或 java)
+language = "rust"
+# 指定要生成代码的表名，为空表示全部
+table_names = []
+# 忽略的表名
+ignore_tables = ["_sqlx_migrations"]
+# 忽略表名前缀
+ignore_table_prefix = "dev_"
+# 代码生成的路径
+path = "./generated"
+# 是否覆盖已存在的文件
+override = false
+
+
+# 是否生成 mod.rs 文件
+gen_mod = true
+# 是否生成 error.rs 文件
+gen_error = true
+# 是否生成 Entity 文件
+gen_entity = true
+# 是否生成 Mapper 文件
+gen_mapper = true
+# 是否生成 MapperXml 文件
+gen_mapper_xml = true
+# 是否生成 Service 文件
+gen_service = true
+# 是否生成 Controller 文件
+gen_controller = true
+
+# 包名配置 (Java 项目适用)
+[packages]
+# entity的包名
+entity = "com.example.entity"
+# mapper的包名
+mapper = "com.example.mapper"
+# mapperXml的包名
+mapper_xml = "com.example.mapper.xml"
+# service的包名
+service = "com.example.service"
+# serviceImpl的包名
+service_impl = "com.example.service.impl"
+# controller的包名
+controller = "com.example.controller"

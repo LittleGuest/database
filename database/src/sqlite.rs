@@ -1,10 +1,10 @@
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use sqlx::{AnyPool, FromRow};
+use sqlx::{AnyPool, FromRow, SqlitePool};
 
 use super::{DatabaseMetadata, Result};
 
-pub struct SqliteMetadata(AnyPool);
+pub struct SqliteMetadata(SqlitePool);
 
 /// 表信息来自 sqlite_master
 #[derive(Debug, Serialize, Deserialize, FromRow)]
@@ -90,22 +90,31 @@ fn sqlite_type(t: &str) -> (String, Option<u16>) {
 }
 
 impl SqliteMetadata {
-    pub fn new(pool: AnyPool) -> Self {
+    pub fn new(pool: SqlitePool) -> Self {
         Self(pool)
     }
 }
 
 impl DatabaseMetadata for SqliteMetadata {
+    fn databases(&self) -> super::BoxFuture<'_, Result<Vec<super::Database>>> {
+        todo!()
+    }
+
     fn schemas(&self) -> super::BoxFuture<'_, Result<Vec<super::Schema>>> {
         todo!()
     }
 
-    fn tables<'a>(&'a self, schema: &'a str) -> super::BoxFuture<'a, Result<Vec<super::Table>>> {
+    fn tables<'a>(
+        &'a self,
+        database: &'a str,
+        schema: &'a str,
+    ) -> super::BoxFuture<'a, Result<Vec<super::Table>>> {
         todo!()
     }
 
     fn columns<'a>(
         &'a self,
+        database: &'a str,
         schema: &'a str,
         table_name: &'a str,
     ) -> super::BoxFuture<'a, Result<Vec<super::Column>>> {
@@ -114,6 +123,7 @@ impl DatabaseMetadata for SqliteMetadata {
 
     fn indexs<'a>(
         &'a self,
+        database: &'a str,
         schema: &'a str,
         table_name: &'a str,
     ) -> super::BoxFuture<'a, Result<Vec<super::Index>>> {
@@ -122,6 +132,7 @@ impl DatabaseMetadata for SqliteMetadata {
 
     fn create_table_sql<'a>(
         &'a self,
+        database: &'a str,
         schema: &'a str,
         table_name: &'a str,
     ) -> super::BoxFuture<'a, Result<String>> {
